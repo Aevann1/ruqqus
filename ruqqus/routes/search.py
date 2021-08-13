@@ -114,7 +114,7 @@ def searchlisting(criteria, v=None, page=1, t="None", sort="top", b=None):
 
     if v and v.hide_offensive:
         posts = posts.filter(Submission.is_offensive == False)
-        
+		
     if v and v.hide_bot:
         posts = posts.filter(Submission.is_bot == False)
 
@@ -286,7 +286,7 @@ def search(v, search_type="posts"):
               User.is_banned==0,
               and_(
                 User.is_banned>0,
-        User.unban_utc>0,
+		User.unban_utc>0,
                 User.unban_utc<now
               )
             )
