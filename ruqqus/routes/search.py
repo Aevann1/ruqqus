@@ -114,7 +114,7 @@ def searchlisting(criteria, v=None, page=1, t="None", sort="top", b=None):
 
     if v and v.hide_offensive:
         posts = posts.filter(Submission.is_offensive == False)
-		
+        
     if v and v.hide_bot:
         posts = posts.filter(Submission.is_bot == False)
 
@@ -286,7 +286,7 @@ def search(v, search_type="posts"):
               User.is_banned==0,
               and_(
                 User.is_banned>0,
-		User.unban_utc>0,
+        User.unban_utc>0,
                 User.unban_utc<now
               )
             )
@@ -398,3 +398,77 @@ def search_guild(name, v, search_type="posts"):
                time_filter=t,
                            b=b
                    )
+
+def searchcommentlisting(criteria, v=None, page=1, t="None", sort="top"):
+
+    comments = g.db.query(Comment).options(lazyload('*')).filter(Comment.parent_submission != None).join(Comment.comment_aux)
+
+    if 'q' in criteria:
+        words=criteria['q'].split()
+        words=[CommentAux.body.ilike('%'+x+'%') for x in words]
+        words=tuple(words)
+        comments=comments.filter(*words)
+
+    if not(v and v.admin_level >= 3):
+        comments = comments.filter(
+            Comment.deleted_utc == 0,
+            Comment.is_banned == False)
+
+    if t:
+        now = int(time.time())
+        if t == 'hour':
+            cutoff = now - 3600
+        elif t == 'day':
+            cutoff = now - 86400
+        elif t == 'week':
+            cutoff = now - 604800
+        elif t == 'month':
+            cutoff = now - 2592000
+        elif t == 'year':
+            cutoff = now - 31536000
+        else:
+            cutoff = 0
+        comments = comments.filter(Comment.created_utc >= cutoff)
+
+    comments=comments.options(contains_eager(Comment.comment_aux))
+
+    if sort == "new":
+        comments = comments.order_by(Comment.created_utc.desc()).all()
+    elif sort == "old":
+        comments = comments.order_by(Comment.created_utc.asc()).all()
+    elif sort == "controversial":
+        comments = sorted(comments.all(), key=lambda x: x.score_disputed, reverse=True)
+    elif sort == "top":
+        comments = sorted(comments.all(), key=lambda x: x.score, reverse=True)
+    elif sort == "bottom":
+        comments = sorted(comments.all(), key=lambda x: x.score)
+
+    total = len(list(comments))
+    firstrange = 25 * (page - 1)
+    secondrange = firstrange+26
+    comments = comments[firstrange:secondrange]
+    return total, [x.id for x in comments]
+
+@app.get("/search/comments")
+@auth_desired
+def searchcomments(v):
+    if v and v.is_banned and not v.unban_utc: return render_template("seized.html")
+
+    query = request.args.get("q", '').strip()
+
+    try: page = max(1, int(request.args.get("page", 1)))
+    except: page = 1
+
+    sort = request.args.get("sort", "top").lower()
+    t = request.args.get('t', 'all').lower()
+
+    criteria=searchparse(query)
+    total, ids = searchcommentlisting(criteria, v=v, page=page, t=t, sort=sort)
+
+    next_exists = (len(ids) == 26)
+    ids = ids[:25]
+
+    comments = get_comments(ids, v=v)
+
+    if request.headers.get("Authorization"): return [x.json for x in comments]
+    else: return render_template("search_comments.html", v=v, query=query, total=total, page=page, comments=comments, sort=sort, t=t, next_exists=next_exists)
